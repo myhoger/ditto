@@ -24,6 +24,7 @@ import datetime
 import subprocess
 import os
 import binascii
+import re
 
 def fix_object(value):
 
@@ -48,26 +49,34 @@ def parse_commandline():
 
         parser = argparse.ArgumentParser(description='Replicate a MySQL database to MemSQL')
         parser.add_argument('database', help='Database to use')
-        parser.add_argument('--host', dest='host', type=str, help='Host where the database server is located', default='127.0.0.1')
-        parser.add_argument('--user', dest='user', type=str, help='Username to log in as', default='root')
-        parser.add_argument('--password', dest='password', type=str, help='Password to use', default='')
-        parser.add_argument('--mysql-port', dest='mysql_port', type=int, help='MySQL port to use', default=3307)
+        parser.add_argument('--host', dest='host', type=str, help='Host where the MySQL database server is located', default='127.0.0.1')
+        parser.add_argument('--memsql-host', dest='memsql_host', type=str, help='Host where the MemSQL database server will be located', default='')
+        parser.add_argument('--user', dest='user', type=str, help='MySQL Username to log in as', default='root')
+        parser.add_argument('--memsql-user', dest='memsql_user', type=str, help='MemSQL username to log in as', default='')
+        parser.add_argument('--password', dest='password', type=str, help='MySQL Password to use', default='')
+        parser.add_argument('--memsql-password', dest='memsql_password', type=str, help='MemSQL password to use', default='')
+        parser.add_argument('--port', dest='port', type=int, help='MySQL port to use', default=3307)
         parser.add_argument('--memsql-port', dest='memsql_port', type=int, help='MemSQL port to use', default=3306)
         parser.add_argument('--no-dump', dest='no_dump', action='store_true',
-                default=False, help="Don't run mysqldump before reading (expects schema to already be set up)")
-        parser.add_argument('--no-flush', dest='no_flush', action='store_true',
-                default=False, help="Don't flush the binlog before reading (may duplicate existing data)")
-
+                            default=False, help="Don't run mysqldump before reading (expects schema to already be set up)")
+        parser.add_argument('--resume-from-end', dest='resume_from_end', action='store_true',
+                            default=False, help="Even if the binlog replication was interrupted, start from the end of the current binlog")
         args = parser.parse_args()
         return args
 
 def get_mysql_settings(args):
     return {'host':args.host, 'user':args.user, 'passwd':args.password,
-            'db': args.database, 'port':args.mysql_port}
+            'db': args.database, 'port':args.port}
 
 def get_memsql_settings(args):
-    return {'host': args.host+':'+str(args.memsql_port), 'user': args.user,
-            'database':args.database, 'password': args.password}
+    memhost = args.host if not args.memsql_host else args.memsql_host
+    memuser = args.user if not args.memsql_user else args.memsql_user
+    mempassword = args.password if not args.memsql_password else args.memsql_password
+    return {'host': memhost+':'+str(args.memsql_port), 'user': memuser,
+            'database':args.database, 'password': mempassword}
+
+def getbinlogpos(stream):
+    return stream._BinLogStreamReader__log_pos
 
 def connect_to_mysql_stream(args, blocking=True):
     """Returns an iterator through the latest MySQL binlog
@@ -81,29 +90,35 @@ def connect_to_mysql_stream(args, blocking=True):
     ##server_id is your slave identifier. It should be unique
     ##blocking: True if you want to block and wait for the next event at the end of the stream
     server_id = int(binascii.hexlify(os.urandom(4)), 16) # A random 4-byte int
-    stream = BinLogStreamReader(connection_settings = mysql_settings,
+    stream = BinLogStreamReader(connection_settings = mysql_settings, resume_stream=True,
                     server_id = server_id, blocking = blocking, only_events =
                     [DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, QueryEvent])
 
     return stream
 
-def connect_to_memsql(args):
+def record_stream_binlog_pos(memsql_conn, stream):
+    log_pos = stream._BinLogStreamReader__log_pos
+    memsql_conn.execute('UPDATE ditto_pos SET pos=%s', log_pos)
+def record_current_binlog_pos(memsql_conn, stream):
+    (_, log_pos) = stream.get_binlog_pos()
+    memsql_conn.execute('UPDATE ditto_pos SET pos=%s', log_pos)
+
+def connect_to_memsql(args, stream):
     """Connects to a MemSQL instance to replicate to
 
     Expects that the `args' argument was obtained from the
     parse_commandline() function (or something very similar)
     """
 
-    # Dumps database and flushes logs based on flags
+    # Dumps database based on flags
     mysql_settings = get_mysql_settings(args)
     if not args.no_dump:
         # Dump with mysqldump
         dumpcommand = ['mysqldump', '--user='+args.user, '--host='+args.host,
-            '--port='+str(args.mysql_port), '--database', args.database, '--force']
+            '--port='+str(args.port), '--database', args.database, '--force']
         if args.password:
             dumpcommand.append('--password='+args.password)
-        if not args.no_flush:
-            dumpcommand.append('--flush-logs')
+        dumpcommand.append('--master-data=2')
         print 'executing: {0}'.format(' '.join(dumpcommand))
         p = subprocess.Popen(dumpcommand, stdout=subprocess.PIPE)
         dump = p.communicate()[0]
@@ -118,12 +133,33 @@ def connect_to_memsql(args):
         p = subprocess.Popen(mysqlcommand, stdin=subprocess.PIPE)
         p.communicate(input=dump)
 
-    elif not args.no_flush:
-        print 'flushing binlogs'
-        MySQLdb.connect(**mysql_settings).cursor().execute('FLUSH LOGS')
+        # Sets the binlog position to the value specified in the dump
+        binlog_pos = int(re.search('MASTER_LOG_POS=(.*);', dump).group(1))
+        stream._BinLogStreamReader__connect_to_stream(custom_log_pos = binlog_pos)
 
     memsql_settings = get_memsql_settings(args)
     memsql_conn = memsql_database.Connection(**memsql_settings)
+
+    # Creates the ditto_pos table that holds the log position of the
+    # next query to be read
+    memsql_conn.execute('CREATE TABLE IF NOT EXISTS ditto_pos(pos int)')
+    if args.no_dump:
+        # If there is a position in ditto_pos and the resume_from_end
+        # flag is not set, use that. Else, record the current position
+        q = memsql_conn.query('SELECT * FROM ditto_pos')
+        if len(q) == 0:
+            # Can't run record_current_binlog_pos, since it uses UPDATE
+            (_, log_pos) = stream.get_binlog_pos()
+            memsql_conn.execute('INSERT INTO ditto_pos(pos) VALUES (%s)', log_pos)
+        elif not args.resume_from_end:
+            log_pos = q[0]['pos']
+            stream._BinLogStreamReader__connect_to_stream(custom_log_pos = int(log_pos))
+        else:
+            record_current_binlog_pos(memsql_conn, stream)
+    else:
+        # Record the binlog_pos from mysqldump
+        memsql_conn.execute('DELETE from ditto_pos')
+        memsql_conn.execute('INSERT INTO ditto_pos(pos) VALUES (%s)', binlog_pos)
 
     return memsql_conn
 

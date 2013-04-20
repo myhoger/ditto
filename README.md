@@ -47,46 +47,53 @@ enter the scripts directory:
     
     $ python replicate.py [database]
 
-This script will recreate the specified database in MemSQL. By default, it
-first runs ``mysqldump`` on the database and flushes the binlog. Then it waits
-for queries on the current binlog that pertain to the specified database and
-runs them on MemSQL. To stop the program, send it an interrupt. There are a
-number of settings you can tweak at the command line:
+This script will recreate the specified database in MemSQL. By
+default, it first runs ``mysqldump`` on the database. Then it waits
+for queries on the current binlog that pertain to the specified
+database and runs them on MemSQL. To stop the program, send it an
+interrupt. There are a number of settings you can tweak at the command
+line:
 
     $ python replicate.py --help
 
 
-    usage: replicate.py [-h] [--host HOST] [--user USER] [--password PASSWORD]
-                        [--mysql-port MYSQL_PORT] [--memsql-port MEMSQL_PORT]
-                        [--no-dump] [--no-flush]
+    usage: replicate.py [-h] [--host HOST] [--memsql-host MEMSQL_HOST] [--user USER]
+                        [--memsql-user MEMSQL_USER] [--password PASSWORD]
+                        [--memsql-password MEMSQL_PASSWORD] [--port PORT]
+                        [--memsql-port MEMSQL_PORT] [--no-dump] [--resume-from-end]
                         database
 
     Replicate a MySQL database to MemSQL
 
     positional arguments:
-    database              Database to use
+      database              Database to use
 
     optional arguments:
-    -h, --help            show this help message and exit
-    --host HOST           Host where the database server is located
-    --user USER           Username to log in as
-    --password PASSWORD   Password to use
-    --mysql-port MYSQL_PORT
-                            MySQL port to use
-    --memsql-port MEMSQL_PORT
+      -h, --help            show this help message and exit
+      --host HOST           Host where the MySQL database server is located
+      --memsql-host MEMSQL_HOST
+                            Host where the MemSQL database server will be located
+      --user USER           MySQL Username to log in as
+      --memsql-user MEMSQL_USER
+                            MemSQL username to log in as
+      --password PASSWORD   MySQL Password to use
+      --memsql-password MEMSQL_PASSWORD
+                            MemSQL password to use
+      --port PORT           MySQL port to use
+      --memsql-port MEMSQL_PORT
                             MemSQL port to use
-    --no-dump             Don't run mysqldump before reading (expects schema to
-                            already be set up)
-    --no-flush            Don't flush the binlog before reading (may duplicate
-                            existing data)
+      --no-dump             Don't run mysqldump before reading (expects schema to already
+                            be set up)
+      --resume-from-end     Even if the binlog replication was interrupted, start from the
+                            end of the current binlog
 
-The scripts directory also contains ``test_replication.py``. This script will
-replicate a specific database from MySQL to MemSQL using mysqldump and the
-current binlog and then verify that the content of all tables in the MySQL
-database match those in the newly created MemSQL database. It can be run in the
-same manner as ``replicate.py``, though it is not intended for replication, as
-it doesn't wait for new queries on the current binlog. To print out all queries
-in the current binlog, run the ``dump_queries.py`` script.
+The scripts directory also contains ``test_replication.py``. This
+script will replicate a specific database from MySQL to MemSQL using
+mysqldump and the current binlog and then verify that the content of
+all tables in the MySQL database match those in the newly created
+MemSQL database. It can be run in the same manner as ``replicate.py``.
+To print out all queries in the current binlog, run the
+``dump_queries.py`` script.
 
 Licence
 =========

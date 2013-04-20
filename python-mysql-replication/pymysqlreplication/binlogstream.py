@@ -41,18 +41,24 @@ class BinLogStreamReader(object):
             self.__connected = False
         self.__ctl_connection.close()
 
-    def __connect_to_stream(self):
-        self._stream_connection = pymysql.connect(**self.__connection_settings)
-        cur = self._stream_connection.cursor()
+    def get_binlog_pos(self):
+        cur = pymysql.connect(**self.__connection_settings).cursor()
+        cur.execute("FLUSH TABLES WITH READ LOCK")
         cur.execute("SHOW MASTER STATUS")
-        (log_file, log_pos) = cur.fetchone()[:2]
+        ret = cur.fetchone()[:2]
+        cur.execute("UNLOCK TABLES")
         cur.close()
+        return ret
 
-
+    def __connect_to_stream(self, custom_log_pos=None):
+        self._stream_connection = pymysql.connect(**self.__connection_settings).cursor()
+        (log_file, log_pos) = self.get_binlog_pos()
         # binlog_pos (4) -- position in the binlog-file to start the stream with
         # flags (2) BINLOG_DUMP_NON_BLOCK (0 or 1)
         # server_id (4) -- server id of this slave
         # binlog-filename (string.EOF) -- filename of the binlog on the master
+        if custom_log_pos is not None:
+            log_pos = custom_log_pos
         command = COM_BINLOG_DUMP
         prelude = struct.pack('<i', len(log_file) + 11) \
                 + int2byte(command)

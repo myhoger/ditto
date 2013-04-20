@@ -21,7 +21,7 @@ import sys
 args = parse_commandline()
 
 stream = connect_to_mysql_stream(args, blocking=False)
-memsql_conn = connect_to_memsql(args)
+memsql_conn = connect_to_memsql(args, stream)
 
 memsql_conn.set_print_queries(True)
 

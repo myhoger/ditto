@@ -1,4 +1,4 @@
 {
   "project_id" : "ditto",
-  "conduit_uri" : "http:\/\/grizzly.memsql.com\/api\/",
+  "conduit_uri" : "http:\/\/grizzly.memsql.com\/api\/"
 }
