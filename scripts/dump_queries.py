@@ -15,7 +15,8 @@
 from replication_utils import *
 import pymysql
 
-args = parse_commandline()
+parser = command_line_parser()
+args = parser.parse_args()
 stream = connect_to_mysql_stream(args)
 # Connects to a dummy MySQL instance to escape query parameters (without having
 # to execute them)

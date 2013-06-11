@@ -1,0 +1,8 @@
+The test_dump.py, test_listen.py, and test_interrupt.py files are
+meant to be called with two arguments. The first argument is the path
+of a .sql file that contains queries to run. These .sql files should
+operate on one database and should begin assuming the database has
+already been created and selected (so no 'USE [db]' query is
+necessary). A few .sql files that can used for testing are in the
+sqlfiles directory. The second argument is the name of the database
+being replicated.
