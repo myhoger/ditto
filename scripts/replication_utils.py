@@ -89,10 +89,14 @@ def command_line_parser():
         parser.add_argument('--resume-from-end', dest='resume_from_end',
                             action='store_true', help="Even if the binlog\
                             replication was interrupted, start from the end of\
-                            the current binlog", default=False)
+                            the current binlog rather than resuming from the interruption",
+                            default=False)
+        parser.add_argument('--resume-from-start', dest='resume_from_start',
+                            action='store_true', help="Start from the beginning\
+                            of the current binlog, regardless of the current position", default=False)
         parser.add_argument('--no-blocking', dest='no_blocking', action='store_true',
                             default=False, help="Don't wait for more events on\
-                            the binlog after replaying the entire binlog")
+                            the binlog after getting to the end")
         return parser
 
 def get_mysql_settings(args):
@@ -107,7 +111,9 @@ def get_memsql_settings(args):
             'database':args.database, 'password': mempassword}
 
 def getbinlogpos(stream):
-    return stream._BinLogStreamReader__log_pos
+    return stream.log_pos
+def setbinlogpos(stream, pos):
+    stream.log_pos = pos
 
 def connect_to_mysql_stream(args):
     """Returns an iterator through the latest MySQL binlog
@@ -122,6 +128,14 @@ def connect_to_mysql_stream(args):
     ##server_id is your slave identifier. It should be unique
     ##blocking: True if you want to block and wait for the next event at the end of the stream
     server_id = int(binascii.hexlify(os.urandom(4)), 16) # A random 4-byte int
+
+    # If the resume_from_end flag is set, it will set the stream to
+    # the latest master binlog position. If the resume_from_start flag
+    # is set, it will be set to the beginning of the binlog. Both
+    # options cannot be set together.
+    if args.resume_from_end and args.resume_from_start:
+        sys.exit("Cannot set both --resume_from_end and --resume_from_start")
+
     stream = BinLogStreamReader(connection_settings = mysql_settings,
                                 resume_stream= args.resume_from_end,
                                 server_id = server_id,
@@ -176,7 +190,7 @@ def connect_to_memsql(args, stream):
 
         # Sets the binlog position to the value specified in the dump
         binlog_pos = int(re.search('MASTER_LOG_POS=(.*);', dump).group(1))
-        stream._BinLogStreamReader__connect_to_stream(custom_log_pos = binlog_pos)
+        stream.connect_to_stream(custom_log_pos = binlog_pos)
 
     memsql_settings = get_memsql_settings(args)
     memsql_conn = memsql_database.Connection(**memsql_settings)
@@ -187,33 +201,60 @@ def connect_to_memsql(args, stream):
     # and the function continues. Else, the database is being used by
     # another ditto process, and the current one aborts, provided
     # ignore_ditto_lock isn't True.
-    memsql_conn.execute('CREATE TABLE IF NOT EXISTS ditto_info(pos int, in_use int)')
+    memsql_conn.execute('CREATE TABLE IF NOT EXISTS ditto_info(pos int, in_use int unique key)')
     # Checks for usage. If it's open, we set in_use to 1
     q = memsql_conn.query('SELECT * FROM ditto_info')
+    ditto_lock_errmsg = 'This database is already in use by another ditto process. If you wish to run ditto anyways, run it with the --ignore-ditto-lock flag.'
     if len(q) != 0 and int(q[0]['in_use']) != 0 and not args.ignore_ditto_lock:
-        sys.exit('This database is already in use by another ditto process')
-    elif len(q) == 0:
-        memsql_conn.execute("INSERT INTO ditto_info values (0, 1)")
-    elif len(q) == 1:
-        memsql_conn.execute("UPDATE ditto_info set in_use=1")
+        sys.exit(ditto_lock_errmsg)
     else:
-        sys.exit('ditto_info table cannot have more than one row')
+        # Tries to aquire the lock by inserting a 1 into the in_use
+        # column. If it fails with a dup key error, it means the lock
+        # has already been acquired and we fail. If it succeeds, it
+        # deletes the old row with the 0 lock. If there was no row at
+        # all, it acquires the lock and sets the initial ditto
+        # position to the beginning of the binlog, triggering the same
+        # behavior as --resume-from-end
+        try:
+            if len(q) == 0:
+                ditto_pos = stream.starting_binlog_pos
+                memsql_conn.execute("INSERT INTO ditto_info values (%s, 1)", ditto_pos)
+            elif len(q) == 1:
+                ditto_pos = int(q[0]['pos'])
+                memsql_conn.execute("INSERT INTO ditto_info values (%s, 1)", ditto_pos)
+                memsql_conn.execute("DELETE FROM ditto_info where in_use=0")
+            else:
+                sys.exit('ditto_info table cannot have more than one row')
+        except MySQLdb.DatabaseError as e:
+            print 'Error:', e
+            # 1062 is the dup key error code
+            if e[0] == 1062 and args.ignore_ditto_lock:
+                print 'Continuing anyways'
+            else:
+                sys.exit(ditto_lock_errmsg)
 
-    if args.no_dump:
-        # If the resume_from_end flag is set or there is no position
-        # in ditto_info, use the latest master position. Else use the
-        # nonzero position in ditto_info.
-        q = memsql_conn.query('SELECT * FROM ditto_info')
-        if args.resume_from_end or int(q[0]['pos']) == 0:
-            record_master_binlog_pos(memsql_conn, stream)
-        else:
-            log_pos = q[0]['pos']
-            stream._BinLogStreamReader__connect_to_stream(
-                custom_log_pos = int(log_pos))
-            record_stream_binlog_pos(memsql_conn, stream)
+    # If the resume_from_end flag is set, record the latest master
+    # position. If the resume_from_start flag is set, record the
+    # initial binlog position. If either of these flags were set, the
+    # correct binlog position should have already been set in the
+    # stream by the connect_to_mysql_stream function
+    if args.resume_from_end:
+        record_master_binlog_pos(memsql_conn, stream)
+    elif args.resume_from_start:
+        setbinlogpos(stream, stream.starting_binlog_pos)
+        record_stream_binlog_pos(memsql_conn, stream)
+    elif args.no_dump:
+        # We look to ditto_info for the binlog position. We should
+        # have gotten the ditto_pos value above.
+        log_pos = ditto_pos
+        stream.connect_to_stream(
+            custom_log_pos = int(log_pos))
+        record_stream_binlog_pos(memsql_conn, stream)
     else:
         # Record the binlog_pos from mysqldump
-        memsql_conn.execute('UPDATE ditto_info SET pos=%s', binlog_pos)
+        stream.connect_to_stream(
+            custom_log_pos = binlog_pos)
+        record_stream_binlog_pos(memsql_conn, stream)
 
     return memsql_conn
 

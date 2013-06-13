@@ -29,10 +29,11 @@ if __name__ == '__main__':
                         help="Don't read the binlog at all after connecting")
 
     args = parser.parse_args()
-    stream, memsql_conn = connect_to_databases(args)
+    stream, memsql_conn = wrap_execution(connect_to_databases, [args])
 
     def equality_checker():
-        if check_equality(args, memsql_conn) == True:
+        if wrap_execution(check_equality, [args, memsql_conn],
+                          memsql_conn, stream):
             print 'Replication successful'
         else:
             print 'Failure'
@@ -40,9 +41,12 @@ if __name__ == '__main__':
     if not args.no_listen:
         # Since blocking=False, binlog_listen will not close the
         # connections before exiting
-        binlog_listen(stream, memsql_conn)
+        binlog_listen(memsql_conn, stream)
         equality_checker()
-        close_connections(stream, memsql_conn)
+        # Doesn't provide stream and memsql_conn, since if
+        # close_connections fails, it's not going to be able to close
+        # connections anyways
+        wrap_execution(close_connections, [memsql_conn, stream])
     else:
         equality_checker()
-        close_connections(stream, memsql_conn)
+        wrap_execution(close_connections, [memsql_conn, stream])

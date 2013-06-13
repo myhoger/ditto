@@ -13,11 +13,12 @@
 
 # Prints out all the SQL queries in the current binlog
 from replication_utils import *
+from replication_globs import *
 import pymysql
 
 parser = command_line_parser()
 args = parser.parse_args()
-stream = connect_to_mysql_stream(args)
+stream = wrap_execution(connect_to_mysql_stream, [args])
 # Connects to a dummy MySQL instance to escape query parameters (without having
 # to execute them)
 mysql_settings = get_mysql_settings(args)

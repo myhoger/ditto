@@ -26,6 +26,6 @@ tools.ConnectToMySQL().execute('reset master')
 run_mysql(filepath, dbname)
 
 # Runs test_replication
-ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-dump", "--no-blocking"]
+ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-dump", "--no-blocking", "--resume-from-start"]
 print 'executing:', ' '.join(ditto_arglist)
 subprocess.call(ditto_arglist)

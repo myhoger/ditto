@@ -30,7 +30,8 @@ class BinLogStreamReader(object):
         self.__blocking = blocking
         self.__only_events = only_events
         self.__server_id = server_id
-        self.__log_pos = None
+        self.log_pos = None
+        self.starting_binlog_pos = 4 # Position in the binlog-file to start the stream with
 
         #Store table meta informations
         self.table_map = {}
@@ -50,25 +51,24 @@ class BinLogStreamReader(object):
         cur.close()
         return ret
 
-    def __connect_to_stream(self, custom_log_pos=None):
+    def connect_to_stream(self, custom_log_pos=None):
         self._stream_connection = pymysql.connect(**self.__connection_settings)
         (log_file, log_pos) = self.get_master_binlog_pos()
-        # binlog_pos (4) -- position in the binlog-file to start the stream with
         # flags (2) BINLOG_DUMP_NON_BLOCK (0 or 1)
         # server_id (4) -- server id of this slave
         # binlog-filename (string.EOF) -- filename of the binlog on the master
         if custom_log_pos is not None:
-            self.__log_pos = custom_log_pos
+            self.log_pos = custom_log_pos
         command = COM_BINLOG_DUMP
         prelude = struct.pack('<i', len(log_file) + 11) \
                 + int2byte(command)
-        if self.__log_pos is None:
+        if self.log_pos is None:
             if self.__resume_stream:
                 prelude += struct.pack('<I', log_pos)
             else:
-                prelude += struct.pack('<I', 4)
+                prelude += struct.pack('<I', self.starting_binlog_pos)
         else:
-            prelude += struct.pack('<I', self.__log_pos)
+            prelude += struct.pack('<I', self.log_pos)
         if self.__blocking:
             prelude += struct.pack('<h', 0)
         else:
@@ -81,7 +81,7 @@ class BinLogStreamReader(object):
     def fetchone(self):
         while True:
             if self.__connected == False:
-                self.__connect_to_stream()
+                self.connect_to_stream()
             pkt = None
             try:
                 pkt = self._stream_connection.read_packet()
@@ -104,7 +104,7 @@ class BinLogStreamReader(object):
                 self.table_map[binlog_event.event.table_id] = binlog_event.event
             if self.__filter_event(binlog_event.event):
                 continue
-            self.__log_pos = binlog_event.log_pos
+            self.log_pos = binlog_event.log_pos
             return binlog_event.event
 
     def __filter_event(self, event):

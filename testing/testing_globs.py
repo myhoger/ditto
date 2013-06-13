@@ -22,8 +22,7 @@ from memsql import common
 def setup_databases():
     """Creates the databases on both ends"""
     if len(sys.argv) != 3:
-        sys.exit(sys.argv[0] + " requires the path to a .sql file and the name of the\
-        replication database as arguments")
+        sys.exit(sys.argv[0] + " requires the path to a .sql file and the name of the replication database as arguments")
 
     filepath = os.path.expanduser(os.path.normpath(sys.argv[1]))
     dbname = sys.argv[2]

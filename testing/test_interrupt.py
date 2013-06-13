@@ -52,11 +52,18 @@ class Command(object):
             thread.join()
         return self.process.returncode
 
+# The first invocation needs to tell ditto to start from the beginning
+# of the binlog. After that it should resume from where it was
+# interrupted.
+startcommand = Command(["python", "../scripts/test_replication.py", dbname,
+                   "--no-dump", "--no-blocking", "--resume-from-start",
+                   "--ignore-ditto-lock"])
 command = Command(["python", "../scripts/test_replication.py", dbname,
-                   "--no-dump", "--no-blocking", "--ignore-ditto-lock"])
+                   "--no-dump", "--no-blocking",
+                   "--ignore-ditto-lock"])
 
 timelimit = 3
 # Keeps running the command until the exit code is 0
-ret = command.run(timelimit)
+ret = startcommand.run(timelimit)
 while ret != 0:
     ret = command.run(timelimit)

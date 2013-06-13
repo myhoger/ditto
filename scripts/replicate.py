@@ -17,6 +17,5 @@ from replication_globs import *
 if __name__ == '__main__':
     parser = command_line_parser()
     args = parser.parse_args()
-    stream, memsql_conn = connect_to_databases(args)
-    if not args.no_listen:
-        binlog_listen(stream, memsql_conn)
+    stream, memsql_conn = wrap_execution(connect_to_databases, [args])
+    binlog_listen(memsql_conn, stream)
