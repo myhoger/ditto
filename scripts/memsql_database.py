@@ -49,6 +49,7 @@ class Connection(object):
         self.max_idle_time = max_idle_time
         self.print_queries = False
         self.print_results = False
+        self.print_function = None
 
         sys_vars = dict(
                 character_set_server =  "utf8",
@@ -104,6 +105,8 @@ class Connection(object):
 
     def set_print_queries(self, print_queries):
         self.print_queries = print_queries
+    def set_print_function(self, print_function):
+        self.print_function = print_function
 
     def close(self):
         """Closes this database connection."""
@@ -229,7 +232,10 @@ class Connection(object):
         if parameters != None and parameters != ():
             query = query % self._db.escape(parameters, self.encoders)
         if self.print_queries:
-            print "%s;" % query
+            if self.print_function is not None:
+                self.print_function("%s;" % query)
+            else:
+                print "%s;" % query
         if isinstance(query, unicode):
             query = query.encode(self._db.character_set_name())
 

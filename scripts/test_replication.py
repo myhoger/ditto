@@ -34,9 +34,9 @@ if __name__ == '__main__':
     def equality_checker():
         if wrap_execution(check_equality, [args, memsql_conn],
                           memsql_conn, stream):
-            print 'Replication successful'
+            logging.info('Replication successful')
         else:
-            print 'Failure'
+            logging.info('Failure')
 
     if not args.no_listen:
         # Since blocking=False, binlog_listen will not close the

@@ -22,12 +22,12 @@ from pymysqlreplication.row_event import *
 from pymysqlreplication.event import *
 
 import argparse
-import datetime
 import subprocess
 import os
 import binascii
 import re
 import sys
+import logging
 
 def fix_object(value):
     """Fixes python objects so that they can be properly inserted into SQL
@@ -97,6 +97,10 @@ def command_line_parser():
         parser.add_argument('--no-blocking', dest='no_blocking', action='store_true',
                             default=False, help="Don't wait for more events on\
                             the binlog after getting to the end")
+        parser.add_argument('--log', dest='loglevel', type=str,
+                            help="Set the logging verbosity with one of the\
+                            following options (in order of increasing verbosity):\
+                            DEBUG, INFO, WARNING, ERROR, CRITICAL", default="DEBUG")
         return parser
 
 def get_mysql_settings(args):
@@ -165,6 +169,7 @@ def connect_to_memsql(args, stream):
 
     """
 
+    logging.basicConfig(level=args.loglevel)
     # Dumps database based on flags
     mysql_settings = get_mysql_settings(args)
     if not args.no_dump:
@@ -174,7 +179,7 @@ def connect_to_memsql(args, stream):
         if args.password:
             dumpcommand.append('--password='+args.password)
         dumpcommand.append('--master-data=2')
-        print 'executing: {0}'.format(' '.join(dumpcommand))
+        logging.debug('executing: {0}'.format(' '.join(dumpcommand)))
         p = subprocess.Popen(dumpcommand, stdout=subprocess.PIPE)
         dump = p.communicate()[0]
 
@@ -184,7 +189,7 @@ def connect_to_memsql(args, stream):
         if args.password:
             mysqlcommand.append('--password='+args.password)
 
-        print 'executing: {0}'.format(' '.join(mysqlcommand))
+        logging.debug('executing: {0}'.format(' '.join(mysqlcommand)))
         p = subprocess.Popen(mysqlcommand, stdin=subprocess.PIPE)
         p.communicate(input=dump)
 
@@ -226,10 +231,10 @@ def connect_to_memsql(args, stream):
             else:
                 sys.exit('ditto_info table cannot have more than one row')
         except MySQLdb.DatabaseError as e:
-            print 'Error:', e
+            logging.error(e)
             # 1062 is the dup key error code
             if e[0] == 1062 and args.ignore_ditto_lock:
-                print 'Continuing anyways'
+                logging.debug('Continuing anyways')
             else:
                 sys.exit(ditto_lock_errmsg)
 

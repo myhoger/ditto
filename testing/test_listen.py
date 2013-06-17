@@ -19,13 +19,14 @@
 import subprocess
 from memsql import tools
 from testing_globs import *
+import logging
 
-filepath, dbname = setup_databases()
-# Resets the binlog before running mysql
-tools.ConnectToMySQL().execute('reset master')
+filepath, dbname, loglevel = setup_databases()
+
 run_mysql(filepath, dbname)
 
 # Runs test_replication
-ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-dump", "--no-blocking", "--resume-from-start"]
-print 'executing:', ' '.join(ditto_arglist)
+ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-dump",
+                 "--no-blocking", "--resume-from-start", "--log="+loglevel]
+logging.debug('executing: %s' % (' '.join(ditto_arglist)))
 subprocess.call(ditto_arglist)

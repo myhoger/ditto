@@ -16,28 +16,47 @@
 import sys
 import os
 import subprocess
+import argparse
+import logging
 
-from memsql import common
+from memsql import tools
 
 def setup_databases():
     """Creates the databases on both ends"""
-    if len(sys.argv) != 3:
-        sys.exit(sys.argv[0] + " requires the path to a .sql file and the name of the replication database as arguments")
 
-    filepath = os.path.expanduser(os.path.normpath(sys.argv[1]))
-    dbname = sys.argv[2]
+    parser = argparse.ArgumentParser(description='Ditto testing script')
+    parser.add_argument('filepath', type=str, help="The path to a .sql file to run")
+    parser.add_argument('database', type=str, help="The name of the database to test replication on")
+    parser.add_argument('--log', dest='loglevel', type=str,
+                        help="Set the logging verbosity with one of the\
+                        following options (in order of increasing verbosity):\
+                        DEBUG, INFO, WARNING, ERROR, CRITICAL", default="DEBUG")
+    args = parser.parse_args()
+    logging.basicConfig(level=args.loglevel)
 
-    common.query_both('', 'drop database if exists ' + dbname)
-    common.query_both('', 'create database ' + dbname)
-    common.query_both('', 'use ' + dbname)
-    return filepath, dbname
+    filepath = os.path.expanduser(os.path.normpath(args.filepath))
+
+    # Connects without the helper functions to avoid reparsing the
+    # arguments and failing because of the --log option
+    conn1 = tools.Connection(user='root', host='127.0.0.1:3307', database='')
+    conn2 = tools.Connection(user='root', host='127.0.0.1:3306', database='')
+
+    conn1.execute('drop database if exists %s' % args.database)
+    conn1.execute('create database %s' % args.database)
+    conn1.execute('use %s' % args.database)
+    # Resets the binlog before running mysql
+    conn1.execute('reset master')
+
+    conn2.execute('drop database if exists %s' % args.database)
+    conn2.execute('create database %s' % args.database)
+    conn2.execute('use %s' % args.database)
+
+    return filepath, args.database, args.loglevel
 
 def run_mysql(filepath, dbname):
     """Runs MySQL on the given file"""
-    filepath = os.path.expanduser(os.path.normpath(sys.argv[1]))
-    dbname = sys.argv[2]
     mysql_arglist = ["mysql", dbname, "--user=root", "--port=3307", "--force"]
-    print 'executing:', ' '.join(mysql_arglist), '<', filepath
+    logging.debug('executing: %s < %s' % (' '.join(mysql_arglist), filepath))
     # Runs mysql on the file
     p = subprocess.Popen(mysql_arglist, stdin=subprocess.PIPE)
     p.communicate(open(filepath).read())

@@ -22,9 +22,7 @@ import subprocess, threading
 from memsql import common, tools
 from testing_globs import *
 
-filepath, dbname = setup_databases()
-# Resets the binlog before playing the file
-tools.ConnectToMySQL().execute('reset master')
+filepath, dbname, loglevel = setup_databases()
 run_mysql(filepath, dbname)
 
 # A threading object to facilitate running a command with a timeout.
@@ -36,18 +34,18 @@ class Command(object):
 
     def run(self, timeout):
         def target():
-            print 'Thread started'
+            logging.debug('Thread started')
             self.process = subprocess.Popen(self.cmd)
-            print 'executing:', ' '.join(self.cmd)
+            logging.debug('executing: %s' % (' '.join(self.cmd)))
             self.process.communicate()
-            print 'Thread finished'
+            logging.debug('Thread finished')
 
         thread = threading.Thread(target=target)
         thread.start()
 
         thread.join(timeout)
         if thread.is_alive():
-            print 'Terminating process'
+            logging.debug('Terminating process')
             self.process.terminate()
             thread.join()
         return self.process.returncode
@@ -57,10 +55,10 @@ class Command(object):
 # interrupted.
 startcommand = Command(["python", "../scripts/test_replication.py", dbname,
                    "--no-dump", "--no-blocking", "--resume-from-start",
-                   "--ignore-ditto-lock"])
+                    "--ignore-ditto-lock", "--log="+loglevel])
 command = Command(["python", "../scripts/test_replication.py", dbname,
                    "--no-dump", "--no-blocking",
-                   "--ignore-ditto-lock"])
+                   "--ignore-ditto-lock", "--log="+loglevel])
 
 timelimit = 3
 # Keeps running the command until the exit code is 0

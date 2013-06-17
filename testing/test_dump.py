@@ -17,11 +17,13 @@
 
 import subprocess
 from testing_globs import *
+import logging
 
-filepath, dbname = setup_databases()
+filepath, dbname, loglevel = setup_databases()
 run_mysql(filepath, dbname)
 
 # Runs test_replication
-ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-listen"]
-print 'executing:', ' '.join(ditto_arglist)
+ditto_arglist = ["python", "../scripts/test_replication.py", dbname, "--no-listen",
+                 "--log="+loglevel]
+logging.debug('executing: %s' % (' '.join(ditto_arglist)))
 subprocess.call(ditto_arglist)
