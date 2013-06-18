@@ -199,6 +199,8 @@ def connect_to_memsql(args, stream):
 
     memsql_settings = get_memsql_settings(args)
     memsql_conn = memsql_database.Connection(**memsql_settings)
+    memsql_conn.set_print_queries(True)
+    memsql_conn.set_print_function(logging.debug)
 
     # Creates the ditto_info table that holds the log position of the
     # next query to be read and a boolean indicating whether the
@@ -206,7 +208,7 @@ def connect_to_memsql(args, stream):
     # and the function continues. Else, the database is being used by
     # another ditto process, and the current one aborts, provided
     # ignore_ditto_lock isn't True.
-    memsql_conn.execute('CREATE TABLE IF NOT EXISTS ditto_info(pos int, in_use int unique key)')
+    memsql_conn.execute('CREATE TABLE IF NOT EXISTS ditto_info(pos bigint primary key, in_use int unique key)')
     # Checks for usage. If it's open, we set in_use to 1
     q = memsql_conn.query('SELECT * FROM ditto_info')
     ditto_lock_errmsg = 'This database is already in use by another ditto process. If you wish to run ditto anyways, run it with the --ignore-ditto-lock flag.'
