@@ -98,6 +98,10 @@ line:
                             Specify a file to get the mysqldump from, rather than having ditto running
                             mysqldump itself
 
+At minimum, the ditto connection to MySQL must have the following
+privileges: RELOAD, REPLICATION SLAVE, REPLICATION CLIENT, SELECT. The
+ditto connection to MemSQL must have full write privileges.
+
 The scripts directory also contains ``test_replication.py``. This
 script will replicate a specific database from MySQL to MemSQL using
 mysqldump and the current binlog and then verify that the content of
