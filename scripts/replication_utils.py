@@ -63,11 +63,11 @@ def command_line_parser():
                             default='127.0.0.1')
         parser.add_argument('--memsql-host', dest='memsql_host', type=str,
                             help='Host where the MemSQL server will be located',
-                            default='')
+                            default='127.0.0.1')
         parser.add_argument('--user', dest='user', type=str,
                             help='MySQL Username to log in as', default='root')
         parser.add_argument('--memsql-user', dest='memsql_user', type=str,
-                            help='MemSQL username to log in as', default='')
+                            help='MemSQL username to log in as', default='root')
         parser.add_argument('--password', dest='password', type=str,
                             help='MySQL Password to use', default='')
         parser.add_argument('--memsql-password', dest='memsql_password', type=str,
@@ -101,6 +101,10 @@ def command_line_parser():
                             help="Set the logging verbosity with one of the\
                             following options (in order of increasing verbosity):\
                             DEBUG, INFO, WARNING, ERROR, CRITICAL", default="DEBUG")
+        parser.add_argument('--mysqldump-file', dest='mysqldump_file', type=str,
+                            help='Specify a file to get the mysqldump from, rather\
+                            than having ditto running mysqldump itself',
+                            default='')
         return parser
 
 def get_mysql_settings(args):
@@ -108,10 +112,8 @@ def get_mysql_settings(args):
             'db': args.database, 'port':args.port}
 
 def get_memsql_settings(args):
-    memhost = args.host if not args.memsql_host else args.memsql_host
-    memuser = args.user if not args.memsql_user else args.memsql_user
     mempassword = args.password if not args.memsql_password else args.memsql_password
-    return {'host': memhost+':'+str(args.memsql_port), 'user': memuser,
+    return {'host': args.memsql_host+':'+str(args.memsql_port), 'user': args.memsql_user,
             'database':args.database, 'password': mempassword}
 
 def getbinlogpos(stream):
@@ -173,29 +175,51 @@ def connect_to_memsql(args, stream):
     # Dumps database based on flags
     mysql_settings = get_mysql_settings(args)
     if not args.no_dump:
-        # Dump with mysqldump
-        dumpcommand = ['mysqldump', '--user='+args.user, '--host='+args.host,
-            '--port='+str(args.port), '--database', args.database, '--force']
-        if args.password:
-            dumpcommand.append('--password='+args.password)
-        dumpcommand.append('--master-data=2')
-        logging.debug('executing: {0}'.format(' '.join(dumpcommand)))
-        p = subprocess.Popen(dumpcommand, stdout=subprocess.PIPE)
-        dump = p.communicate()[0]
+        if args.mysqldump_file != '':
+            # Get mysqldump from file
+            p2_input = open(args.mysqldump_file)
+        else:
+            # Run mysqldump and pipe the process output
+            dumpcommand = ['mysqldump', '--user='+args.user, '--host='+args.host,
+                           '--port='+str(args.port), '--database', args.database, '--force']
+            if args.password:
+                dumpcommand.append('--password='+args.password)
+            dumpcommand.append('--master-data=2')
+            logging.debug('executing: {0}'.format(' '.join(dumpcommand)))
+            p1 = subprocess.Popen(dumpcommand, stdout=subprocess.PIPE)
+            p2_input = p1.stdout
 
-        # Run mysql client (connected to memsql) on file
-        mysqlcommand = ['mysql', '--user='+args.user, '--host='+args.host,
+        # Read enough of the input to get the binlog position then terminate
+        for line in iter(p2_input.readline, ''):
+            match = re.search('MASTER_LOG_POS=(.*);', line)
+            if match is not None:
+                binlog_pos = int(match.group(1))
+                break
+        if binlog_pos is None:
+            sys.exit("Could not find binlog position in mysqldump output. Try running with the --master-data=2 option")
+
+        logging.debug('mysqldump binlog position: %s' % binlog_pos)
+
+        # Reconnects to the file or the output so that it can be read again properly
+        if args.mysqldump_file != '':
+            p2_input = open(args.mysqldump_file)
+        else:
+            p1.terminate()
+            p1 = subprocess.Popen(dumpcommand, stdout=subprocess.PIPE)
+            p2_input = p1.stdout
+
+        # Run mysql client (connected to memsql) on mysqldump output
+        mysqlcommand = ['mysql', '--user='+args.memsql_user, '--host='+args.memsql_host,
             '--port='+str(args.memsql_port), '--force']
         if args.password:
             mysqlcommand.append('--password='+args.password)
-
         logging.debug('executing: {0}'.format(' '.join(mysqlcommand)))
-        p = subprocess.Popen(mysqlcommand, stdin=subprocess.PIPE)
-        p.communicate(input=dump)
-
-        # Sets the binlog position to the value specified in the dump
-        binlog_pos = int(re.search('MASTER_LOG_POS=(.*);', dump).group(1))
-        stream.connect_to_stream(custom_log_pos = binlog_pos)
+        p2 = subprocess.Popen(mysqlcommand, stdin=p2_input)
+        # Close the stdout on p1 if it was made so that p1 can recieve
+        # a SIGPIPE if p2 exits first
+        if args.mysqldump_file == '':
+            p1.stdout.close()
+        p2.communicate()
 
     memsql_settings = get_memsql_settings(args)
     memsql_conn = memsql_database.Connection(**memsql_settings)

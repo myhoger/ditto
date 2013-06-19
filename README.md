@@ -56,12 +56,12 @@ line:
 
     $ python replicate.py --help
 
-
     usage: replicate.py [-h] [--host HOST] [--memsql-host MEMSQL_HOST] [--user USER]
-                        [--memsql-user MEMSQL_USER] [--password PASSWORD]
-                        [--memsql-password MEMSQL_PASSWORD] [--port PORT]
-                        [--memsql-port MEMSQL_PORT] [--no-dump] [--resume-from-end]
-                        database
+                    [--memsql-user MEMSQL_USER] [--password PASSWORD]
+                    [--memsql-password MEMSQL_PASSWORD] [--port PORT] [--memsql-port MEMSQL_PORT]
+                    [--no-dump] [--ignore-ditto-lock] [--resume-from-end] [--resume-from-start]
+                    [--no-blocking] [--log LOGLEVEL] [--mysqldump-file MYSQLDUMP_FILE]
+                    database
 
     Replicate a MySQL database to MemSQL
 
@@ -72,7 +72,7 @@ line:
       -h, --help            show this help message and exit
       --host HOST           Host where the MySQL database server is located
       --memsql-host MEMSQL_HOST
-                            Host where the MemSQL database server will be located
+                            Host where the MemSQL server will be located
       --user USER           MySQL Username to log in as
       --memsql-user MEMSQL_USER
                             MemSQL username to log in as
@@ -82,10 +82,21 @@ line:
       --port PORT           MySQL port to use
       --memsql-port MEMSQL_PORT
                             MemSQL port to use
-      --no-dump             Don't run mysqldump before reading (expects schema to already
-                            be set up)
-      --resume-from-end     Even if the binlog replication was interrupted, start from the
-                            end of the current binlog
+      --no-dump             Don't run mysqldump before reading (expects schema to already be set up)
+      --ignore-ditto-lock   If the ditto lock is set in the database being replicated, ignore it and
+                            proceed anyways (this is intended to be used only if the ditto lock is
+                            incorrectly set when no ditto processes are active, not to allow multiple
+                            ditto processes to function simultaneously)
+      --resume-from-end     Even if the binlog replication was interrupted, start from the end of the
+                            current binlog rather than resuming from the interruption
+      --resume-from-start   Start from the beginning of the current binlog, regardless of the current
+                            position
+      --no-blocking         Don't wait for more events on the binlog after getting to the end
+      --log LOGLEVEL        Set the logging verbosity with one of the following options (in order of
+                            increasing verbosity): DEBUG, INFO, WARNING, ERROR, CRITICAL
+      --mysqldump-file MYSQLDUMP_FILE
+                            Specify a file to get the mysqldump from, rather than having ditto running
+                            mysqldump itself
 
 The scripts directory also contains ``test_replication.py``. This
 script will replicate a specific database from MySQL to MemSQL using

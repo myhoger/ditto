@@ -25,6 +25,7 @@ mysql_settings = get_mysql_settings(args)
 mysql_settings['charset'] = 'utf8'
 dummy_conn = pymysql.connect(**mysql_settings)
 
+logging.basicConfig(level=args.loglevel)
 logging.debug('listening')
 
 try:
@@ -32,6 +33,6 @@ try:
         queries = process_binlogevent(binlogevent)
         for q in queries:
             query_args = map(lambda obj: dummy_conn.escape(obj), q[1])
-            logging.debug(q[0] % tuple(query_args))
+            logging.info(q[0] % tuple(query_args))
 except KeyboardInterrupt:
     logging.debug('Exiting')
